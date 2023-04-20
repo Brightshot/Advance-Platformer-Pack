@@ -69,8 +69,8 @@ public class InputHandeler : MonoBehaviour
         #region Vectors
         InputAxis = new Vector2
         {
-            x = Input.GetAxis("Horizontal"),
-            y = Input.GetAxis("Vertical")
+            x = Input.GetAxisRaw("Horizontal"),
+            y = Input.GetAxisRaw("Vertical")
         };
 
         AimDirection = -(transform.position - Camera.main.ScreenToWorldPoint(Input.mousePosition));

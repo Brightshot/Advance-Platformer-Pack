@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.PlayerLoop;
 using static InputHandeler;
 
 [DisallowMultipleComponent]
@@ -9,24 +11,37 @@ public class AdvanceJump : MonoBehaviour
 {
     public Jump_Types jumpType = Jump_Types.NormalJump;
 
+    public delegate void ExtendJump();
+    public ExtendJump extend_Jump;
+
+    [SerializeField] private float staminaUsage;
+
     #region components
     private Rigidbody2D m_rigidbody;
     private PlatformerController m_platformController;
     private StaminaScript stamina;
     #endregion
 
-    [SerializeField]
-    private float StaminaUsage = 10f;
     [Space(10)]
 
     [HideInInspector]public float a_bufferTime = 0.2f;
     [HideInInspector] public float[] force = new float[3]{ 7f,10f,3f};
+    private float _time;
+    public bool isJumping { get; private set; }
+
+    public delegate void Boost();
+    public static Boost boost;
+
+    public static void animateBoost()
+    {
+        boost?.Invoke();
+    }
 
     private void Start()
     {
         m_rigidbody = GetComponent<Rigidbody2D>();
         m_platformController = GetComponent<PlatformerController>();
-        stamina= GetComponent<StaminaScript>();
+        stamina = GetComponent<StaminaScript>();
     }
 
     private void Update()
@@ -42,9 +57,48 @@ public class AdvanceJump : MonoBehaviour
                 DoubleJump();
                 break;
             case Jump_Types.ExtendedJump:
+                if (Input.GetKeyUp(KeyCode.Space))
+                {
+                    isJumping = false;
+                }
                 break;
-            default:
-                break;
+        }
+    }
+
+    void FixedUpdate()
+    {
+        if(jumpType== Jump_Types.ExtendedJump)
+        {
+            ExtendedJump();
+        }
+    }
+
+    AnimationCurve jumpFallOff;
+    private void ExtendedJump()
+    {
+        jumpFallOff = AnimationCurve.Linear(0, 1, force[2],0);
+
+        var fallOff = jumpFallOff.Evaluate(_time * 2f);
+
+        if (!isJumping)
+        {
+            _time = 0 ;
+        }
+
+        if (_time >= force[2]) { isJumping = false; return; }
+
+        if (Input.GetKey(KeyCode.Space) && m_platformController.lastOnGround)
+        {
+            isJumping= true;
+        }
+        
+        if (Input.GetKey(KeyCode.Space) && isJumping && stamina.GetValue() >= staminaUsage)
+        {
+            _time += Time.deltaTime;
+            m_rigidbody.AddForce(transform.up * 80 * fallOff, ForceMode2D.Force);
+
+            animateBoost();
+            stamina.changeValue(-staminaUsage);
         }
     }
 
@@ -58,11 +112,12 @@ public class AdvanceJump : MonoBehaviour
 
         if (KeyEvents.pressed("jump"))
         {
-            if (jumpIndex == 1 && m_platformController.lastOnGround==false && stamina.GetValue() >= StaminaUsage)
+            if (jumpIndex == 1 && m_platformController.lastOnGround==false && stamina.GetValue() >= staminaUsage)
             {
                 Jump();
+                animateBoost();
                 KeyEvents.KeysCalled.Remove("jump");
-                stamina.changeValue(-StaminaUsage);
+                stamina.changeValue(-staminaUsage);
             }
 
             if (m_platformController.lastOnGround == true)

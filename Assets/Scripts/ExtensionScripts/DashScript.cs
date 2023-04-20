@@ -26,8 +26,8 @@ public class DashScript : MonoBehaviour
 
     [Space(10),SerializeField]private KeyCode DashKey = KeyCode.Z;
 
-    public delegate void dash();
-    public static dash DashEvent;
+    public delegate void DashEvent();
+    public static DashEvent dash_Event;
 
     private void Start()
     {
@@ -38,19 +38,21 @@ public class DashScript : MonoBehaviour
 
     private void Update()
     {
+        //Start dash 
         if(Input.GetKeyDown(DashKey) && !has_dashed && stamina.GetValue() >= StaminaUsage)
         {
             if (controller.performing_action == false)
             {
-                Instantiate(DashParticle, transform.position, Quaternion.identity);
+                if(DashParticle!=null)Instantiate(DashParticle, transform.position, Quaternion.identity);
                 StartCoroutine("StartDash");
             }
         }
     }
 
+    #region numerators
     private IEnumerator resetDash()
     {
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(.5f);
 
         controller.performing_action = false;
 
@@ -58,6 +60,7 @@ public class DashScript : MonoBehaviour
         has_dashed = false;
     }
 
+    //Initiate dash after delay
     private IEnumerator StartDash()
     {
         controller.performing_action = true;
@@ -65,10 +68,12 @@ public class DashScript : MonoBehaviour
         yield return new WaitForSeconds(StartDelay);
         m_Rigidbody.simulated = true;
 
-        DashEvent?.Invoke();
+        dash_Event?.Invoke();   //Invoke dash
         Dash();
     }
+    #endregion
 
+    //Dash logic
     private void Dash()
     {
         has_dashed= true;

@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Unity.VisualScripting;
 using UnityEngine;
+using static Cinemachine.CinemachineTargetGroup;
 using static UnityEngine.GraphicsBuffer;
 
 public class HookManager : MonoBehaviour
@@ -24,6 +26,28 @@ public class HookManager : MonoBehaviour
     public Transform selected { get; private set; }
     public Sprite sprite { get; set; }
     public Transform selectCircle { get; set; }
+    public float searchDistance { get; set; } = 20;
+
+    [Space(20)]
+    #region Rope settings
+
+    public LineRenderer lineRenderer;
+    [SerializeField] private int resolution = 40;
+
+    private float time;
+
+    [Header("Rope Settings")]
+    public float Firespeed = 4;
+    [SerializeField] private float RetractSpeed = 7;
+    [SerializeField] private float amplitude = .4f;
+    [SerializeField] private float frequency = 2;
+    [SerializeField] private float smoothDistance = 0.8f;
+    public bool connected { get;  set; }
+    public Transform player { get; set; }
+
+    private AnimationCurve ropeProgression;
+    public AnimationCurve ropeRetract = AnimationCurve.Linear(0, 0, 1, 1);
+    #endregion 
 
     private void Awake()
     {
@@ -41,11 +65,72 @@ public class HookManager : MonoBehaviour
         circle.sprite = sprite;
         selectCircle = circle.transform;
         selectCircle.gameObject.SetActive(false);
+
+        //Rope
+        ropeProgression = AnimationCurve.Linear(0, 1f, smoothDistance, 0);
     }
 
     private void Update()
     {
         if(selected!=null) selectCircle.position = selected.position;
+        RopeLogic();
+    }
+
+    private void FixedUpdate()
+    {
+        DrawWaves();
+    }
+
+    private void RopeLogic()
+    {
+        lineRenderer.transform.parent = null;
+
+        ropeProgression = AnimationCurve.Linear(0, 1f, smoothDistance, 0);
+
+        float speed = (connected) ? Firespeed : RetractSpeed;
+
+        if (connected)
+        {
+            time += Time.deltaTime * speed;
+        }
+        else
+        {
+            time -= Time.deltaTime * speed;
+        }
+        time = Mathf.Clamp(time, 0, 1);
+    }
+
+
+    //Draw waves to grapple hook wave
+    Vector2 target;
+    void DrawWaves()
+    {
+        lineRenderer.positionCount = resolution;
+
+        if (player == null) return;
+
+        if (selected != null)
+        {  target = selected.position; }
+
+        var localPosition = -(player.position - (Vector3)target);
+
+        for (int i = 0; i < resolution; i++)
+        {
+            float delta = (float)i / (resolution - 1);
+
+            var multiplier = ropeProgression.Evaluate(time);
+            var retract = ropeRetract.Evaluate(time);
+
+            var offset = Vector2.Perpendicular(localPosition).normalized;
+            var targetPos = Vector2.Lerp(Vector2.zero, localPosition * retract, delta);
+
+            float dx = Mathf.Lerp(0, localPosition.magnitude, delta) * retract;
+            float dy = Mathf.Sin(dx * frequency) * amplitude;
+
+            var currentPos = (new Vector2(targetPos.x, targetPos.y)) + (offset * dy * multiplier);
+
+            lineRenderer.SetPosition(i, currentPos + (Vector2)player.position);
+        }
     }
 
 
@@ -71,13 +156,18 @@ public class HookManager : MonoBehaviour
         selected = null;
     }
 
-    public void Search(Transform player)
+    //Can this search ,if yes then get the selected hook
+    public bool CanSearch()
     {
         grappleHooks.Clear();
 
-        player.GetComponent<Rigidbody2D>().constraints = RigidbodyConstraints2D.FreezeAll;
+        //Get all hooks in scene and add hooks to list "grappleHooks" if its distance is within search distance
+        grappleHooks = GameObject.FindGameObjectsWithTag("Hook").Select(t =>t.transform)
+        .Where(t=> Vector2.Distance(t.position,player.position) <= searchDistance).ToList();
 
-        grappleHooks = GameObject.FindGameObjectsWithTag("Hook").Select(t => t.transform).ToList();
+        if (grappleHooks.Count <= 0) return false;
+
+        player.GetComponent<Rigidbody2D>().constraints = RigidbodyConstraints2D.FreezeAll;
 
         //sort data by closest distance to player
         var orderedData = grappleHooks.OrderByDescending(t => player.position.x - (t.position.x)).ToList();
@@ -103,9 +193,14 @@ public class HookManager : MonoBehaviour
             selectCircle.position = selected.position;
             selectCircle.gameObject.SetActive(true);
         }
+
+        return true;
     }
 
-    public void GetRay(Transform player)
+
+    //Get ray direction and select object in the direction
+    //used for dot select
+    public void GetRay()
     {
         Vector2 dir = player.position - Camera.main.ScreenToWorldPoint(Input.mousePosition);
 

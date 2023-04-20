@@ -4,8 +4,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using static PlatformerController;
-using Unity.VisualScripting;
-using UnityEditor.SceneManagement;
 
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlatformerController : MonoBehaviour
@@ -14,15 +12,23 @@ public class PlatformerController : MonoBehaviour
     #region Variables
 
     private Vector2 input;
+    public Vector2 _input
+    {
+        get
+        {
+            return input;
+        }
+    }
+
     public static Vector2 PlayerVelocity { get; private set; }
-    public Transform Visuals;
-    [HideInInspector]public bool performing_action;
+    public bool performing_action;
 
     #endregion
 
     #region Components
 
-    protected Rigidbody2D m_Rigidbody;
+    private Rigidbody2D m_Rigidbody;
+    public Transform Visuals;
 
     #endregion
 
@@ -37,9 +43,10 @@ public class PlatformerController : MonoBehaviour
     [Space]
 
     public LayerMask GroundLayer;   //The Layers to be detected by overlap box
-    [HideInInspector]public bool lastOnGround; //is player on ground after a time?
+    public bool lastOnGround { get; set; } //is player on ground after a time?
 
-    public static bool isGrounded { get; private set; }
+    public bool isGrounded { get; private set; }
+    bool has_checked = false;
     [SerializeField, Space, Range(0, 1f)]
     private float cayoteTime = 0.2f;
     #endregion
@@ -63,12 +70,22 @@ public class PlatformerController : MonoBehaviour
     public static M_Jump jump;
     #endregion
 
-    [Space]
+    [Space(10)]
+    #region GravityVariables
 
+    private float fallOff = 1;
+    [SerializeField] private float gravityMultiplier=1.5f;
+
+    #endregion
+
+    [Space]
     #region JumpVariables
+
+    //Controlled by Editor
 
     [HideInInspector]public bool controlsJump=true;
     [HideInInspector]public float jumpForce=5;
+    private bool jumped;
 
     [Tooltip("The Amount of time the jump function should be true. \nThe Higher the value the further away from the ground jump can be called"),Range(0,0.6f)]
     [HideInInspector]public float bufferTime=0.2f;
@@ -86,7 +103,7 @@ public class PlatformerController : MonoBehaviour
     private void Start()
     {
         performing_action= false;
-       m_Rigidbody = GetComponent<Rigidbody2D>();  //Rigidbody
+       m_Rigidbody = GetComponent<Rigidbody2D>();  //Get Rigidbody
     }
 
     private void Update()
@@ -102,6 +119,7 @@ public class PlatformerController : MonoBehaviour
         }
     }
 
+    //Set player direction by passing either 1 or -1 as dir
     public void SetDirection(int dir)
     {
         Visuals.localScale = new Vector3(1 * Mathf.Sign(dir), 1);
@@ -110,6 +128,7 @@ public class PlatformerController : MonoBehaviour
     private void FixedUpdate()
     {
         Movement();
+        Gravity();
     }
 
     private void Actions()
@@ -137,7 +156,6 @@ public class PlatformerController : MonoBehaviour
         CallKey("jump", bufferTime);
     }
 
-    Vector2 aim;    //stores the scale of player when aiming
     private void InputHandle()
     {
         input = InputHandeler.InputAxis;
@@ -155,7 +173,28 @@ public class PlatformerController : MonoBehaviour
         m_Rigidbody.AddForce(transform.right * movementSpeed * 10,ForceMode2D.Force);
     }
 
-    private bool jumped;
+    private void Gravity()
+    {
+        if (performing_action) { fallOff = 1 ; return; }
+
+        fallOff = (isGrounded) ? 1 : (fallOff += Time.deltaTime * 2);
+
+        float modifier = 1f;
+
+
+        //Increase Gravity when Maxheight is attained and returning down
+        if (!isGrounded && PlayerVelocity.y <= 1f)
+        {
+            modifier = gravityMultiplier;
+        }
+        else if (isGrounded)
+        {
+            modifier = 1;
+        }
+
+        m_Rigidbody.AddForce(-transform.up * (10 * fallOff * modifier), ForceMode2D.Force);
+    }
+
     public void Jump()
     {
         StartCoroutine("ResetJump");
@@ -167,16 +206,7 @@ public class PlatformerController : MonoBehaviour
         lastOnGround = false;
     }
 
-
-    public IEnumerator ResetJump()
-    {
-        jumped = true;
-        yield return new WaitForSeconds(0.3f);
-        jumped = false;
-    }
-
     //Ground Detection
-    bool has_checked=false;
     private void CheckGround()
     {
         isGrounded = Physics2D.OverlapBox((Vector2)transform.position + offset, detectionScale, 90,GroundLayer);
@@ -227,10 +257,22 @@ public class PlatformerController : MonoBehaviour
 
     #region Numerators
 
+    /// <summary>
+    /// Wait until cayote time runs out before making last on ground false
+    /// 
+    /// allow the player to still be able to jump after a few seconds after leaving the platform
+    /// </summary>
     private IEnumerator CheckIfOnGround()
     {
         yield return new WaitForSeconds(cayoteTime);
         lastOnGround = false;
+    }
+
+    public IEnumerator ResetJump()
+    {
+        jumped = true;
+        yield return new WaitForSeconds(0.3f);
+        jumped = false;
     }
 
     //Boost upward

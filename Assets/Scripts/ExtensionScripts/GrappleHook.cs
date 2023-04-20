@@ -14,6 +14,7 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
 
     [SerializeField]
     private Sprite SelectionSprite;
+    [SerializeField] private float MaxSearchDistance = 20;
 
     [Header("KeyMapping")]
     [SerializeField] private KeyCode SearchKey = KeyCode.X;
@@ -22,13 +23,14 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
     private bool rotating;
     private bool clockwise = false;
     bool isReady = true;
+    bool pressed;
 
     private Transform target;
-    private EffectsScripts vfx;
     private StaminaScript stamina;
 
     [Space(20)]
     [SerializeField,Range(0f,5f)] private float rotateSpeed=1.0f;
+
     [Tooltip("Note : A lower value makes the speed faster")]
     [SerializeField] private float movementSpeed=10;
     [SerializeField] private float releaseForce=20;
@@ -45,6 +47,7 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
 
     private PlatformerController controller;
     private HookManager manager;
+    private EffectsScripts effects;
 
     public void OnBeforeSerialize()
     {
@@ -60,8 +63,9 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
 
         manager.selectType= selectionType;
         manager.sprite = SelectionSprite;
+        manager.searchDistance = MaxSearchDistance;
 
-        if(manager.selectCircle!=null) manager.selectCircle.GetComponent<SpriteRenderer>().sprite= SelectionSprite;
+        if (manager.selectCircle!=null) manager.selectCircle.GetComponent<SpriteRenderer>().sprite= SelectionSprite;
     }
 
     public void OnAfterDeserialize()
@@ -80,20 +84,26 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
     {
         controller = GetComponent<PlatformerController>();
         stamina = GetComponent<StaminaScript>();
+        manager.player = transform;
         _time = HoldTime;
-        vfx = EffectsScripts.Instance;
+        effects = EffectsScripts.Instance;
     }
 
     private void Update()
     {
         if(manager.selected!=null) target = manager.selected;
 
-        if(stamina.GetValue() >= StaminaUsage)
+        //reset rotation when player disconnected
+        if (!connected) controller.Visuals.up = Vector2.Lerp(controller.Visuals.up, Vector2.up, Time.deltaTime * 10);
+
+        if (stamina.GetValue() >= StaminaUsage)
         SelectionLogic();
     }
 
     private void LateUpdate()
     {
+        if (Input.GetKeyUp(SearchKey)) pressed = false;
+
         if (Input.GetKeyUp(SearchKey) && connected && rotating)
         {
             Disconnect();
@@ -127,7 +137,7 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
     private void FixedUpdate()
     {
         //rotate around pivot after search key is held after first release
-        if (Input.GetKey(SearchKey) && connected && _time > 0.1f)
+        if (Input.GetKey(SearchKey) && connected && _time > 0.1f && !pressed)
         {
             rotating = true;
             SetAngle();
@@ -154,10 +164,12 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
     private void Disconnect()
     {
         //reset 
+        StopCoroutine("FireGrapple");
         manager.reset();
         target = null;
         connected = false;
-        //
+        manager.connected = false;
+        //~        
 
         GetComponent<Rigidbody2D>().constraints = RigidbodyConstraints2D.FreezeRotation;
 
@@ -171,20 +183,29 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
     {
         if (Input.GetKeyDown(SearchKey) && isReady && !connected && !controller.performing_action)
         {
-             StopCoroutine("reset");
 
-             manager.Search(transform);
+            if(!manager.CanSearch())
+            {
+                Disconnect();
+                return;
+            }
+            else
+            {
+                controller.performing_action = true;
+                effects.LensValue = .3f;
+                effects.panel.color = Color.white;
+                effects.isAnimating = true;
+            }
 
-             //grapple hook is activated player is performing an action
-             controller.performing_action = true;
-
+            StopCoroutine("reset");
         }
+
 
         if (selectionType == HookManager.SelectType.DotSelect)
         {
             if (Input.GetKey(SearchKey) && isReady && !connected)
             {
-                manager.GetRay(transform);
+                manager.GetRay();
             }
         }
 
@@ -192,47 +213,35 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
 
         if (Input.GetKey(SearchKey) && isReady && !connected)
         {
-            _time -= Time.deltaTime;
+            _time -= Time.unscaledDeltaTime;
             _time = Mathf.Clamp(_time,0,Mathf.Infinity);
         }
-
-
-        if (Input.GetKeyUp(SearchKey)) _time = HoldTime;
         #endregion
 
         if (target == null) return;
 
-        if (_time <= 0 && !connected)
-        {
-            ShakeController.Shake();
-            connected = true;
-            isReady = false;
-        }
+        int direction = (int)Mathf.Sign((transform.position - target.position).x) * 1;   //Get direction player visual
 
-        if (Input.GetKey(SearchKey) && _time > 0.1f && !connected)
-        {
-            vfx.LensValue = -.3f;
-            vfx.Target = target;
-        }
+        if (connected)
+            controller.Visuals.up = Vector2.Lerp(controller.Visuals.up,-(transform.position - target.position),Time.deltaTime * 5);
         else
-        {
-            vfx.Target = null;
-            vfx.LensValue = 0;
-        }
+            controller.SetDirection(-direction);
 
         //connect to hook when key released
-        if (Input.GetKeyUp(SearchKey) && _time > 0.1f)
+        if (Input.GetKeyUp(SearchKey))
         {
-            ShakeController.Shake();
-            stamina.changeValue(-5);
-            connected = true;
-            isReady = false;
+            if(_time > 0.1f)
+            StartCoroutine("FireGrapple");
+        }
+
+        if (_time <= 0 && !connected)
+        {
+            StartCoroutine("FireGrapple");
         }
 
         if (!rotating)
         {
-            var direction = transform.position - target.position;
-            if (Mathf.Sign(direction.x) == 1) clockwise = true; else if (Mathf.Sign(direction.x) == -1) clockwise = false;
+            if (Mathf.Sign(direction) == 1) clockwise = true; else if (Mathf.Sign(direction) == -1) clockwise = false;
         }
 
         if (selectionType == HookManager.SelectType.DistanceSelect)
@@ -277,7 +286,7 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
 
         //Get Tangent
         var dir = (transform.position - target.position).normalized;   //normal direction
-        tangent = Quaternion.AngleAxis(90, transform.forward) * dir;
+        tangent = Vector2.Perpendicular(dir);
     }     
 
     IEnumerator reset()
@@ -293,6 +302,22 @@ public class GrappleHook : MonoBehaviour,ISerializationCallbackReceiver
         rotating= false;
         yield return new WaitForSeconds(0.1f);
         controller.performing_action = false;
+    }
+
+    IEnumerator FireGrapple()
+    {
+        pressed = true;
+        manager.connected = true;
+        effects.LensValue = 0.0f;
+        effects.isAnimating = false;
+        _time = HoldTime;
+
+        yield return new WaitForSeconds(1 / manager.Firespeed);
+        
+        isReady = false;
+        ShakeController.Shake();
+        stamina.changeValue(-5);
+        connected = true;
     }
 
     #endregion

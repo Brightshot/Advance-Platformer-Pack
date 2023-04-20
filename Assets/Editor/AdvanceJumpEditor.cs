@@ -35,6 +35,7 @@ public class AdvanceJumpEditor : Editor
 
                 break;
             case Jump_Types.ExtendedJump:
+                controller.force[2] = EditorGUILayout.FloatField("JumpTime", controller.force[2]);
                 break;
             default:
                 break;
